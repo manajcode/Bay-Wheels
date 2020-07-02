@@ -1,0 +1,309 @@
+---
+title: " 2018 Lyft Bicycle Flex dashboard"
+author: "Michael Najarro"
+date: "June 6th, 2020"
+output: 
+  flexdashboard::flex_dashboard:
+    storyboard: true
+    social: menu
+    source: embed
+---
+
+```{r setup, include=FALSE}
+library(pacman)
+p_load(flexdashboard,
+       tidyverse,
+       plotly,
+       lubridate,
+       leaflet,
+       ggmap,
+       magrittr,
+       dplyr)
+```
+
+```{r obtain the URLs of the data, inlclude = FALSE}
+# 1. create the URL that links to the 2018 months :
+URL <- rep(0, 12)
+for(i in 1:9){
+  URL[[i]] <- paste0("https://s3.amazonaws.com/fordgobike-data/20180",i,"-fordgobike-tripdata.csv.zip")
+}
+
+for(i in 10:12){
+  URL[[i]] <- paste0("https://s3.amazonaws.com/fordgobike-data/2018",i,"-fordgobike-tripdata.csv.zip")
+}
+```
+
+```{r download the data, include = FALSE}
+# 2. now download the data from the URL
+for(i in 1:9){
+  download.file(URL[[i]], destfile = paste0( "./20180",i,"-fordgobike-tripdata.csv.zip"), method="curl")
+}
+
+for(i in 10:12){
+  download.file(URL[[i]], destfile = paste0( "./2018",i,"-fordgobike-tripdata.csv.zip"), method="curl")
+}
+```
+
+
+```{r unzipping data, include = FALSE}
+# 2. unzip the data.
+for(i in 1:9){
+  unzip(paste0("./20180",i,"-fordgobike-tripdata.csv.zip"),exdir="./data")
+}
+
+for(i in 10:12){
+  unzip(paste0("./2018",i,"-fordgobike-tripdata.csv.zip"),exdir="./data")
+}
+```
+
+```{r reading the csv files into R, include = FALSE}
+# 3. read the data into the environment. there were issues with
+# read bulk; I'm doing uploading manually so I don't have to
+# manipulate data types.
+
+#fgb2018 <- read_bulk(directory = "./data", extension = ".csv")
+
+fgb201801 <- read_csv(file="./data/201801-fordgobike-tripdata.csv")
+fgb201802 <- read_csv(file="./data/201802-fordgobike-tripdata.csv")
+fgb201803 <- read_csv(file="./data/201803-fordgobike-tripdata.csv")
+fgb201804 <- read_csv(file="./data/201804-fordgobike-tripdata.csv")
+fgb201805 <- read_csv(file="./data/201805-fordgobike-tripdata.csv")
+fgb201806 <- read_csv(file="./data/201806-fordgobike-tripdata.csv")
+fgb201807 <- read_csv(file="./data/201807-fordgobike-tripdata.csv")
+fgb201808 <- read_csv(file="./data/201808-fordgobike-tripdata.csv")
+fgb201809 <- read_csv(file="./data/201809-fordgobike-tripdata.csv")
+fgb2018010 <- read_csv(file="./data/201810-fordgobike-tripdata.csv")
+fgb201811 <- read_csv(file="./data/201811-fordgobike-tripdata.csv")
+fgb201812 <- read_csv(file="./data/201812-fordgobike-tripdata.csv")
+
+# 4. rbind the data.
+fgb2018 <- rbind(fgb201801,fgb201802,fgb201803,fgb201804,fgb201805,fgb201806,fgb201807,fgb201808, fgb201809,fgb2018010, fgb201811, fgb201812)
+
+# 5. Check the data.
+dim(fgb2018)
+glimpse(fgb2018)
+
+# the code here is important for image 2! however I am commmenting it out so that the flexboard 
+#doesn't mess up.
+#fgb2018 %>% select(member_gender) %>%
+#  group_by(member_gender) %>%
+#  count()  
+```
+
+
+```{r remove non-bound dfs, include = FALSE}
+# 6. clean up the data
+rm(fgb201801,fgb201802,fgb201803,fgb201804,fgb201805,fgb201806,fgb201807,fgb201808,fgb201809,fgb2018010,fgb201811,fgb201812)
+```
+
+
+
+```{r include = FALSE}
+# 7. add month, day, year, and age as seperate columns.
+fgb2018 <- fgb2018 %>%
+  mutate(year = year(start_time),
+         month = month(start_time),
+         day = day(start_time),
+         age = year(now()) - member_birth_year
+         )
+```
+
+```{r stations, include = FALSE}
+# 8a. discover what are the most popular start and end stations.
+a<- fgb2018 %>% group_by(start_station_name) %>%
+  count(start_station_name) %>%
+  arrange(desc(n)) %>%
+  head() %>%
+  pull(start_station_name)
+
+b <- fgb2018 %>% group_by(end_station_name) %>%
+  count(end_station_name) %>%
+  arrange(desc(n)) %>%
+  head() %>%
+  pull(end_station_name)
+
+stations <- unique(a,b)
+rm(a,b)
+```
+
+
+```{r popular_start_stations_per_gender}
+# 8b. discover what are the most popular start
+# stations per gender.
+
+# by males
+m <- fgb2018 %>%
+  group_by(start_station_name, member_gender) %>%
+  count(start_station_name) %>%
+  filter(member_gender == "Male") %>%
+  arrange(desc(n)) %>%
+  head()
+  
+# by females
+f <- fgb2018 %>%
+  group_by(start_station_name, member_gender) %>%
+  count(start_station_name) %>%
+  filter(member_gender == "Female") %>%
+  arrange(desc(n)) %>%
+  head()
+
+# by other
+o <- fgb2018 %>%
+  group_by(start_station_name, member_gender) %>%
+  count(start_station_name) %>%
+  filter(member_gender == "Other") %>%
+  arrange(desc(n)) %>%
+  head()
+
+# by NA
+nota <- fgb2018 %>%
+  group_by(start_station_name, member_gender) %>%
+  count(start_station_name) %>%
+  filter(is.na(member_gender)) %>%
+  arrange(desc(n)) %>%
+  head()
+
+
+# combine all data
+allgenderstart <- bind_rows(m,f)
+allgenderstart <- data.frame(allgenderstart)
+rm(m,f,o,nota)
+
+#class(allgenderstart)
+#str(allgenderstart)
+#length(allgenderstart$start_station_name)
+#length(allgenderstart$member_gender)
+#length(allgenderstart$n)
+
+# use the code below to get counts at most popular start stations
+# by gender..edited out for now.
+#tapply(allgenderstart$n, INDEX = #list(allgenderstart$start_station_name, #allgenderstart$member_gender), FUN = max, na.omit = TRUE)
+```
+
+
+
+
+
+```{r most popular end stations per gender}
+# by males
+m <- fgb2018 %>%
+  group_by(end_station_name, member_gender) %>%
+  count(end_station_name) %>%
+  filter(member_gender == "Male") %>%
+  arrange(desc(n)) %>%
+  head()
+  
+# by females
+f<- fgb2018 %>%
+  group_by(end_station_name, member_gender) %>%
+  count(end_station_name) %>%
+  filter(member_gender == "Female") %>%
+  arrange(desc(n)) %>%
+  head()
+
+# by other
+o <- fgb2018 %>%
+  group_by(end_station_name, member_gender) %>%
+  count(end_station_name) %>%
+  filter(member_gender == "Other") %>%
+  arrange(desc(n)) %>%
+  head()
+
+# by NA
+nota <- fgb2018 %>%
+  group_by(end_station_name, member_gender) %>%
+  count(end_station_name) %>%
+  filter(is.na(member_gender)) %>%
+  arrange(desc(n)) %>%
+  head()
+
+# combine all data
+allgendersend <- bind_rows(m,f,o,nota)
+rm(m,f,o,nota)
+
+# use the code below to get counts at most popular end stations
+# by gender..edited out for now.
+#tapply(allgendersend$n, list(allgendersend$end_station_name, #allgendersend$member_gender), FUN = max, na.omit = TRUE)
+```
+
+
+
+```{r get geocoordinates of popular stations, include = FALSE}
+# 9. pull out geo-coordinates for ferry building and caltrain station2.
+graph3info <- fgb2018 %>% select(start_station_name, start_station_latitude, start_station_longitude) %>%
+  filter(start_station_name %in% stations) %>%
+  unique()
+
+#graph3info
+ferry <- graph3info[1,]
+caltrain2 <- graph3info[3,]
+```
+
+
+### In 2018, who rode Lyft Bicycles?
+
+```{r histogram of age of riders faceted by sex}
+g3 <- fgb2018 %>% filter(age < 70) %>%
+  arrange(desc(age)) %>%
+  ggplot(mapping = aes(x = age)) +
+  geom_histogram(show.legend = FALSE) +
+  facet_wrap(~member_gender) +
+labs(x = "age", y = "count")
+
+ggplotly(g3)
+```
+
+
+***
+The frequency histograms display the number of riders per each gender's age grouping. In total, 1,863,721 riders rented Lyft Bicycles in 2018.
+
+Male customers whose ages were 29, 32, and 34 years old were the predominant customers renting Lyft Bicycles at around 110,000 riders per age. In total males constituted the most riders with 1,288,085 or 69% of total bicycle rentals.  
+
+Among Female customers, females in their late 20s (27 and 29 years of age) rented bicylces the most, at around 50,000 riders per age. Total female ridership was far less than male customers at 438,188 or 23.5% of total bicycle rentals.
+
+Customers who did not align with traditional gender roles make up a tiny portion of the entire data set at 27,081 riders or 1.4% of the total riders.
+
+
+### For how long did customers ride a bicycle?
+
+```{r line graph of  avg ridership per month}
+ca <- fgb2018 %>% 
+  select(month, duration_sec, member_gender) %>%
+  group_by(month, member_gender) %>%
+  summarize(avg_time_of_ride = mean(duration_sec/60)) %>%
+  filter(!is.na(member_gender)) %>%
+  ggplot(mapping = aes(x = month, y = avg_time_of_ride)) +
+  facet_wrap(~member_gender) +
+  geom_line() +
+  labs(x = "month", y = "minutes") +
+  scale_x_continuous(breaks = seq(0, 12, 1)) +
+  scale_y_continuous((breaks = seq(0,30,5)))
+
+ggplotly(ca)
+```
+
+
+***
+
+On average, female riders rode bicycles for 13 to 16 minutes while male riders rode for 11 to 13 minutes. Non-classified gender "other" encompassed the range of male and females.
+
+Seasonal weather, combined with the timing of the holidays, may have affected the duration of customer's rides. durations appear to be the longest during the summer months of San francisco. Typically the weather is foggy, windy and cold. In addition, tourism is at its peak in the summer,leading to more traffic. The shortest bike trips occured during the late fall and winter months. San Francisco's cold, wet, rainy season coincides with the months continaing the shortest travel times; it is possible that riders are riding as efficiently and shorter distances to avoid the rain. 
+
+
+
+### To where did customers ride?
+
+```{r locations of the top 2 most used start/end destinations}
+
+m_sf <- leaflet() %>%
+  addTiles() %>%  # Add default OpenStreetMap map tiles
+  addMarkers(lng=c(-122.3942, -122.3955), lat=c(37.79539,37.77664), popup=c("San Francisco Ferry Building (#1 starting station)", "San Francisco Caltrain Station no. 2 (#1 ending station)"))  
+m_sf
+```
+
+
+*** 
+
+The most popular starting destination in 2018 was the San francisco Ferry Building, with 38,461 instances occuring.
+
+The most popular ending destination was the Caltrain station no. 2, with 37,617 instances occuring.
